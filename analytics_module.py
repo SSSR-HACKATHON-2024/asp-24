@@ -31,8 +31,10 @@ def main_anlt_module(scan_result_dict, scan_id):
         create_table_analytics(conn)
 
     full_data = []
+    ip_addr_counter = 0
     
     for ip_addr in scan_result_dict:
+        ip_addr_counter += 1
         for port in scan_result_dict[ip_addr]['ports']:
             state = scan_result_dict[ip_addr]['ports'].get(port).get('state')
             service = scan_result_dict[ip_addr]['ports'].get(port).get('service')
@@ -57,6 +59,7 @@ def main_anlt_module(scan_result_dict, scan_id):
             # count_software_records(product_version_query, connection) # после выполнения будет количество текущего продукта в инфраструктуре
             
     insert_data(conn, full_data)
+    # send_to_tg(ip_addr_counter, conn)
 
 
 def create_table_analytics(conn):
@@ -64,6 +67,7 @@ def create_table_analytics(conn):
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS analytics (
             id SERIAL PRIMARY KEY,
+            datetime TIMESTAMP,
             ip_addr VARCHAR,
             port INT,
             state VARCHAR,
@@ -85,6 +89,15 @@ def insert_data(conn, data):
         conn.commit()
 
 
-scan_result_dict, scan_id = ({'10.0.2.3': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}, '10.0.2.2': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '9879': {'state': 'open', 'service': 'tcpwrapped', 'software': 'postgres', 'version': '213456', 'cpe': None, 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': 'postgres', 'version': '9', 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '37966': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': 'postgres', 'version': '14', 'cpe': None, 'protocol': 'tcp'}, '58276': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}, '10.0.2.4': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '9789': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '33206': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}}, '23456789-sdfghjkl-345678')
+# def send_to_tg(ip_addr_counter, conn):
+#     with conn.cursor() as cur:
+#         query = f"SELECT id, cve_id FROM cve_table WHERE cve_table.id IN (SELECT CAST(analytics.cve_info AS DECIMAL) FROM analytics) DESC LIMIT 3"
+#         cur.execute(query)
+#         records = cur.fetchall()
+#     tg_message = f'Сканирование завершено\nПросканировано {ip_addr_counter} ip-адресов\nТоп найденных язвимостей: \n{records}'
+
+
+
+scan_result_dict, scan_id = ({'10.0.2.3': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': 'openssh', 'version': '9.6', 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}, '10.0.2.2': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '9879': {'state': 'open', 'service': 'tcpwrapped', 'software': 'postgres', 'version': '213456', 'cpe': None, 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': 'postgres', 'version': '9', 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '37966': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': 'postgres', 'version': '14', 'cpe': None, 'protocol': 'tcp'}, '58276': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}, '10.0.2.4': {'ports': {'631': {'state': 'open', 'service': 'ipp', 'software': 'CUPS', 'version': '2.3', 'cpe': 'cpe:/a:apple:cups:2.3', 'protocol': 'tcp'}, '9789': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '30523': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '33206': {'state': 'open', 'service': 'tcpwrapped', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '36759': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}, '45235': {'state': 'open', 'service': 'unknown', 'software': None, 'version': None, 'cpe': None, 'protocol': 'tcp'}}}}, '23456789-sdfghjkl-345678')
 
 main_anlt_module(scan_result_dict, scan_id)
