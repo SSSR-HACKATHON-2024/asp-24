@@ -15,7 +15,6 @@ import scanner.core
 
 db = {}
 
-
 def parse_masscan(file):
     try:
         with open(file, "r") as f:
@@ -142,16 +141,16 @@ def main(config):
     config["nmap_path"] = os.path.join(directory, f"nmap-{id}.xml")
     rate_string = f"--rate {rate}" if rate else "--rate 25000"
     for addr in addrs:
-        print(addr)
+
+        continue
     db[addrs[0]] = {}
     scan_cidr(config, addr)
     scan_ips(config)
     print(db)
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(help="Сканируемые хосты", dest="host", nargs="?")
+    parser.add_argument(help="Сканируемые хосты (IP или CIDR, можно через запятую)", dest="host", nargs="?")
     parser.add_argument(
         "-q",
         "--quick",
@@ -186,6 +185,9 @@ if __name__ == "__main__":
         help="Задать количество потоков Nmap",
         dest="threads",
         type=int,
+    )
+    parser.add_argument(
+
     )
     args = parser.parse_args()
     if (args.quick and args.deep) or (args.stealth and args.aggressive):
