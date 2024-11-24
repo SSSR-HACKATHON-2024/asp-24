@@ -102,12 +102,17 @@ def insert_data(conn, data):
 
 
 def send_to_tg(ip_addr_counter, conn):
+    config = load_config()
     with conn.cursor() as cur:
         query = f"SELECT id, cve_id, cvss FROM cve_table WHERE cve_table.cve_id IN (SELECT analytics.cve_info FROM analytics) ORDER BY cvss DESC LIMIT 3"
         cur.execute(query)
         records = cur.fetchall()
     tg_message = f'Сканирование завершено\nПросканировано {ip_addr_counter} ip-адресов\nТоп найденных язвимостей: \n{records}'
-    TOKEN = "7799725093:AAFj5jVR6f_xON3RvblvSEYKetkaa1A_Wk4"
-    CHAT_ID = "1338937662" # чат администратора
-    url_req = "https://api.telegram.org/bot" + TOKEN + "/sendMessage" + "?chat_id=" + CHAT_ID + "&text=" + tg_message
-    requests.get(url_req)
+    try:
+        TOKEN = config['telegram']['token']
+        CHAT_ID = config['telegram']['chat_id']
+        url_req = "https://api.telegram.org/bot" + TOKEN + "/sendMessage" + "?chat_id=" + CHAT_ID + "&text=" + tg_message
+        requests.get(url_req)
+        print("Сообщение в Telegram отправлено.")
+    except:
+        quit("Сообщенеие в Telegram не было отправлено.")
