@@ -1,9 +1,8 @@
+from psycopg2 import sql
 import json
-import pandas as pd
 import psycopg2
 import zipfile
 import requests
-from psycopg2 import sql
 
 def download_file(url, file_name):
     try:
@@ -68,8 +67,9 @@ def insert_data(conn, data):
 
 def main_cve_DB():
     try:
+        print("Подключение к БД")
         conn = psycopg2.connect(
-            host='10.11.114.158',
+            host='192.168.0.11',
             database='hack_db',
             user='postgres',
             password='sovietchungus',
@@ -80,12 +80,13 @@ def main_cve_DB():
         print(f"Ошибка подключения к базе данных: {e}")
 
     if conn:
+        create_table_CVE(conn)  
         with conn.cursor() as cur:
             query_del_cve_table = "TRUNCATE TABLE cve_table;"
             cur.execute(query_del_cve_table)
             conn.commit
         
-        create_table_CVE(conn)
+        
 
     for i in range(2023, 2024 + 1):
         nist_url = f'https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-{i}.json.zip'
@@ -100,6 +101,3 @@ def main_cve_DB():
         insert_data(conn, data_to_insert)
 
     conn.close()
-
-
-main_cve_DB()

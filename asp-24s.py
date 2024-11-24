@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import subprocess
 import sys
@@ -10,10 +9,15 @@ import uuid
 import random
 import argparse
 import ipaddress
+from netaddr import IPRange
 from multiprocessing import Pool
 import scanner.core
 
-db = {}
+import cve_json_parser
+import analytics_module
+
+
+res_dict = {}
 
 def parse_masscan(file):
     try:
@@ -28,10 +32,10 @@ def parse_masscan(file):
     for match in matches:
         ip = match.group(1)
         port = match.group(2)
-        if ip not in db:
-            db[ip] = {}
-        db[ip][port] = {}
-    return db
+        if ip not in res_dict:
+            res_dict[ip] = {}
+        res_dict[ip][port] = {}
+    return res_dict
 
 
 def parse_nmap(nmapfiles):
@@ -42,33 +46,39 @@ def parse_nmap(nmapfiles):
                 ip = re.search('<address addr="([^"]+)"', lines).group(1)
             except:
                 continue
-            db[ip] = {}
-            db[ip]["ports"] = {}
+            res_dict[ip] = {}
+            res_dict[ip]["ports"] = {}
             matches = re.finditer(
               r'<port protocol="(\w+)" portid="(\d+)"><state state="([^"]+)" reason="[^"]+" reason_ttl="\d+"\/><service name="([^"]*)"( product="([^"]*)")?( version="([^"]*)")?.*?>.*?(<cpe>([^<]*))?',lines
             )
             for match in matches:
                 port = match.group(2)
-                db[ip]["ports"][port] = {}
-                db[ip]["ports"][port]["state"] = match.group(3)
-                db[ip]["ports"][port]["service"] = match.group(4)
-                db[ip]["ports"][port]["software"] = match.group(6)
-                db[ip]["ports"][port]["version"] = match.group(8)
-                db[ip]["ports"][port]["protocol"] = match.group(1)
-                db[ip]["ports"][port]["cpe"] = match.group(10)
+                res_dict[ip]["ports"][port] = {}
+                res_dict[ip]["ports"][port]["state"] = match.group(3)
+                res_dict[ip]["ports"][port]["service"] = match.group(4)
+                res_dict[ip]["ports"][port]["software"] = match.group(6)
+                res_dict[ip]["ports"][port]["version"] = match.group(8)
+                res_dict[ip]["ports"][port]["protocol"] = match.group(1)
+                res_dict[ip]["ports"][port]["cpe"] = match.group(10)
                 if not match.group(8) and match.group(10):
                     if match.group(10).count(":") > 3:
-                        db[ip]["ports"][port]["version"] = match.group(10).split(":")[-1]
-    return db
+                        res_dict[ip]["ports"][port]["version"] = match.group(10).split(":")[-1]
+    return res_dict
 
 
-def nmap(ip, ports, nmapfile, i):
+def nmap_aggressive(ip, ports, nmapfile, i):
     sb = subprocess.Popen(
-        f"nmap -Pn -oX {nmapfile}.{i} -sV {ip} -p{ports} > /dev/null", shell=True
+        f"nmap -T5 -Pn -A -r -oX {nmapfile}.{i} {ip} -p{ports} > /dev/null", shell=True
     )
     sb.wait()
     return sb.returncode
 
+def nmap_stealthy(ip,ports,nmapfile,i):
+    sb = subprocess.Popen(
+        f"nmap -T1 -Pn -oX -r {nmapfile}.{i} -sV {ip} -p{ports} > /dev/null", shell=True
+    )
+    sb.wait()
+    return sb.returncode
 
 def signal_handler(sig, frame):
     if ms:
@@ -76,40 +86,41 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-def scan_cidr(config, addr):
+def scan_cidr(config):
     global ms
-    masscan_file = f"masscan-{config['scan_id']}.txt"
-    rate = 1000 if config["stealth"] else 1250000
-    print(f"Сканирование CIDR: {addr} со скоростью {rate} пакетов в секунду...")
-    masscan_ports = ",".join(scanner.core.config["top_ports"])
-    masscan_path = config["masscan_path"]
+    res_dict = {}
+    masscan_path = config['masscan_path']
+    rate = 2500 if config["stealth"] else 1250000
+    masscan_ports = '0-65535' if config['deep'] else ",".join(scanner.core.config["top_ports"]) 
+    print(f"Предварительное сканирование узлов")
+    addr = ','.join(config['cidrs'])
     ms = subprocess.Popen(
-        f"./masscan -p{masscan_ports} --rate {rate} -oG {masscan_path} {addr} > /dev/null 2>&1",
+        f"./masscan -p{masscan_ports} --rate {rate} -oG {masscan_path} {addr} ", #> /dev/null 2>&1
         shell=True,
     )
     ms.wait()
     if ms.returncode < 0:
         quit(f"Masscan завершился с кодом ошибки {ms.returncode}")
-    db = parse_masscan(config["masscan_path"])
-    return
+    res_dict = parse_masscan(masscan_path)
+    return res_dict
 
 
 def scan_ips(config):
     num_cpus = config["threads"] or psutil.cpu_count()
     pool = Pool(processes=num_cpus)
-    quick = False
+    quick = config['quick']
     if quick:
         nmap_ports = ",".join(scanner.core.config["top_ports"])
     else:
         nmap_ports = "0-65535"
-    print("Дополнительное сканирование хостов...")
+    print("Углубленное сканирование хостов...")
     nmap_path = config["nmap_path"]
-    paths = [f"{nmap_path}.{i}" for i in range(len(db.keys()))]
+    paths = [f"{nmap_path}.{i}" for i in range(len(res_dict.keys()))]
     results = [
         pool.apply_async(
-            nmap, args=(host, nmap_ports, nmap_path, list(db.keys()).index(host))
+            nmap_stealthy if config['stealth'] else nmap_aggressive, args=(host, nmap_ports, nmap_path, list(res_dict.keys()).index(host))
         )
-        for host in db.keys()
+        for host in res_dict.keys()
     ]
     for p in results:
         p.wait()
@@ -118,17 +129,11 @@ def scan_ips(config):
 
 
 def main(config):
-    global ms
-
     if os.getuid() != 0:
         quit("Данное изделие требует прав администратора.")
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-
-    rate = 2500000
-    addrs = ["10.0.2.15", "10.0.2.0/24"]
-    threads = None
 
     cwd = sys.path[0]
     directory = f"asp24-scans"
@@ -137,16 +142,12 @@ def main(config):
     config["scan_id"] = str(uuid.uuid4())
     id = config["scan_id"]
 
-    config["masscan_path"] = os.path.join(directory, f"masscan-{id}.xml")
+    config["masscan_path"] = os.path.join(directory,f"masscan-{id}.txt")
     config["nmap_path"] = os.path.join(directory, f"nmap-{id}.xml")
-    rate_string = f"--rate {rate}" if rate else "--rate 25000"
-    for addr in addrs:
 
-        continue
-    db[addrs[0]] = {}
-    scan_cidr(config, addr)
+    scan_cidr(config)
     scan_ips(config)
-    print(db)
+    return res_dict,config["scan_id"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -186,9 +187,6 @@ if __name__ == "__main__":
         dest="threads",
         type=int,
     )
-    parser.add_argument(
-
-    )
     args = parser.parse_args()
     if (args.quick and args.deep) or (args.stealth and args.aggressive):
         quit("Ошибка: указаны противоречащие параметры")
@@ -198,5 +196,31 @@ if __name__ == "__main__":
         "deep": args.deep,
         "aggressive": args.aggressive,
         "stealth": args.stealth,
+        "addrs": args.host,
+        "cidrs": [],
     }
-    main(config)
+    if(args.host is None):
+        quit("Не предоставлены цели для сканирования")
+    for addr in config['addrs'].split(','):
+        netrange = addr.split('-')
+        if len(netrange) > 1:
+            try:
+                iprange = IPRange(netrange[0],netrange[1])
+                config['cidrs'].append(addr)
+            except:
+                quit(f"Неверный диапазон IP-адресов: {addr}")
+        else:
+            try:
+                ip = ipaddress.ip_network(addr)
+                if str(ip.netmask) == '255.255.255.255':
+                    config['cidrs'].append(addr)
+                else:
+                    config['cidrs'].append(addr)
+            except:
+                quit(f"Неверный IP или CIDR: {addr}")
+    # cve_json_parser.main_cve_DB()
+    res_dict,scan_id = main(config)
+    if len(res_dict.keys()) > 0:
+        print(res_dict)
+        cve_json_parser.main_cve_DB()
+        analytics_module.main_anlt_module(res_dict,scan_id)
