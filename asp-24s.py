@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import subprocess
 import sys
@@ -16,8 +17,8 @@ import scanner.core
 import cve_json_parser
 import analytics_module
 
-
 res_dict = {}
+
 
 def parse_masscan(file):
     try:
@@ -41,15 +42,21 @@ def parse_masscan(file):
 def parse_nmap(nmapfiles):
     for nmapfile in nmapfiles:
         with open(nmapfile, "r") as file:
-            lines = '\n'.join(file.readlines())
+            lines = "\n".join(file.readlines())
             try:
                 ip = re.search('<address addr="([^"]+)"', lines).group(1)
             except:
                 continue
+            try:
+                ptr = re.search('<hostname name="([^"]+)" type="PTR"\/>',lines).group(1)
+                
+            except:
+                ptr = None
             res_dict[ip] = {}
             res_dict[ip]["ports"] = {}
             matches = re.finditer(
-              r'<port protocol="(\w+)" portid="(\d+)"><state state="([^"]+)" reason="[^"]+" reason_ttl="\d+"\/><service name="([^"]*)"( product="([^"]*)")?( version="([^"]*)")?.*?>.*?(<cpe>([^<]*))?',lines
+                r'<port protocol="(\w+)" portid="(\d+)"><state state="([^"]+)" reason="[^"]+" reason_ttl="\d+"\/><service name="([^"]*)"( product="([^"]*)")?( version="([^"]*)")?.*?>.*?(<cpe>([^<]*))?',
+                lines,
             )
             for match in matches:
                 port = match.group(2)
@@ -60,25 +67,30 @@ def parse_nmap(nmapfiles):
                 res_dict[ip]["ports"][port]["version"] = match.group(8)
                 res_dict[ip]["ports"][port]["protocol"] = match.group(1)
                 res_dict[ip]["ports"][port]["cpe"] = match.group(10)
+                res_dict[ip]["ports"][port]["domain"] = ptr
                 if not match.group(8) and match.group(10):
                     if match.group(10).count(":") > 3:
-                        res_dict[ip]["ports"][port]["version"] = match.group(10).split(":")[-1]
+                        res_dict[ip]["ports"][port]["version"] = match.group(10).split(
+                            ":"
+                        )[-1]
     return res_dict
 
 
 def nmap_aggressive(ip, ports, nmapfile, i):
     sb = subprocess.Popen(
-        f"nmap -T5 -Pn -A -r -oX {nmapfile}.{i} {ip} -p{ports} > /dev/null", shell=True
+        f"nmap -T5 -Pn -r -oX {nmapfile}.{i} -sV  {ip} -p{ports} > /dev/null", shell=True
     )
     sb.wait()
     return sb.returncode
 
-def nmap_stealthy(ip,ports,nmapfile,i):
+
+def nmap_stealthy(ip, ports, nmapfile, i):
     sb = subprocess.Popen(
         f"nmap -T1 -Pn -oX -r {nmapfile}.{i} -sV {ip} -p{ports} > /dev/null", shell=True
     )
     sb.wait()
     return sb.returncode
+
 
 def signal_handler(sig, frame):
     if ms:
@@ -89,13 +101,15 @@ def signal_handler(sig, frame):
 def scan_cidr(config):
     global ms
     res_dict = {}
-    masscan_path = config['masscan_path']
+    masscan_path = config["masscan_path"]
     rate = 2500 if config["stealth"] else 1250000
-    masscan_ports = '0-65535' if config['deep'] else ",".join(scanner.core.config["top_ports"]) 
-    print(f"Предварительное сканирование узлов")
-    addr = ','.join(config['cidrs'])
+    masscan_ports = (
+        "0-65535" if config["deep"] else ",".join(scanner.core.config["top_ports"])
+    )
+    print(f"Предварительное сканирование узлов с использованием Masscan")
+    addr = ",".join(config["cidrs"])
     ms = subprocess.Popen(
-        f"./masscan -p{masscan_ports} --rate {rate} -oG {masscan_path} {addr} ", #> /dev/null 2>&1
+        f"/opt/asp-24/masscan -p{masscan_ports} --rate {rate} -oG {masscan_path} {addr} ",  # > /dev/null 2>&1
         shell=True,
     )
     ms.wait()
@@ -108,17 +122,18 @@ def scan_cidr(config):
 def scan_ips(config):
     num_cpus = config["threads"] or psutil.cpu_count()
     pool = Pool(processes=num_cpus)
-    quick = config['quick']
+    quick = config["quick"]
     if quick:
         nmap_ports = ",".join(scanner.core.config["top_ports"])
     else:
         nmap_ports = "0-65535"
-    print("Углубленное сканирование хостов...")
+    print("Углубленное сканирование хостов с использованием Nmap")
     nmap_path = config["nmap_path"]
     paths = [f"{nmap_path}.{i}" for i in range(len(res_dict.keys()))]
     results = [
         pool.apply_async(
-            nmap_stealthy if config['stealth'] else nmap_aggressive, args=(host, nmap_ports, nmap_path, list(res_dict.keys()).index(host))
+            nmap_stealthy if config["stealth"] else nmap_aggressive,
+            args=(host, nmap_ports, nmap_path, list(res_dict.keys()).index(host)),
         )
         for host in res_dict.keys()
     ]
@@ -142,16 +157,22 @@ def main(config):
     config["scan_id"] = str(uuid.uuid4())
     id = config["scan_id"]
 
-    config["masscan_path"] = os.path.join(directory,f"masscan-{id}.txt")
+    config["masscan_path"] = os.path.join(directory, f"masscan-{id}.txt")
     config["nmap_path"] = os.path.join(directory, f"nmap-{id}.xml")
 
-    scan_cidr(config)
+    if len(config['cidrs']) > 0:
+        scan_cidr(config)
     scan_ips(config)
-    return res_dict,config["scan_id"]
+    return res_dict, config["scan_id"]
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(help="Сканируемые хосты (IP или CIDR, можно через запятую)", dest="host", nargs="?")
+    parser.add_argument(
+        help="Сканируемые хосты (IP или CIDR, можно через запятую)",
+        dest="host",
+        nargs="?",
+    )
     parser.add_argument(
         "-q",
         "--quick",
@@ -199,28 +220,31 @@ if __name__ == "__main__":
         "addrs": args.host,
         "cidrs": [],
     }
-    if(args.host is None):
+    if args.host is None:
         quit("Не предоставлены цели для сканирования")
-    for addr in config['addrs'].split(','):
-        netrange = addr.split('-')
+    for addr in config["addrs"].split(","):
+        netrange = addr.split("-")
         if len(netrange) > 1:
             try:
-                iprange = IPRange(netrange[0],netrange[1])
-                config['cidrs'].append(addr)
+                iprange = IPRange(netrange[0], netrange[1])
+                config["cidrs"].append(addr)
             except:
                 quit(f"Неверный диапазон IP-адресов: {addr}")
         else:
             try:
                 ip = ipaddress.ip_network(addr)
-                if str(ip.netmask) == '255.255.255.255':
-                    config['cidrs'].append(addr)
+                if str(ip.netmask) == "255.255.255.255":
+                    res_dict[addr] = {}
                 else:
-                    config['cidrs'].append(addr)
+                    config["cidrs"].append(addr)
             except:
                 quit(f"Неверный IP или CIDR: {addr}")
-    # cve_json_parser.main_cve_DB()
-    res_dict,scan_id = main(config)
-    if len(res_dict.keys()) > 0:
-        print(res_dict)
+    res_dict, scan_id = main(config)
+    filtered_dict = {}
+    for i in res_dict.keys():
+        if 'ports' in res_dict[i]:
+            filtered_dict[i] = res_dict[i]
+    if len(filtered_dict.keys()) > 0:
+        print("Передача полученных данных в СУБД...")
         cve_json_parser.main_cve_DB()
-        analytics_module.main_anlt_module(res_dict,scan_id)
+        analytics_module.main_anlt_module(filtered_dict, scan_id)

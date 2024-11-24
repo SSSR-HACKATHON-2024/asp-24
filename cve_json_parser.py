@@ -4,6 +4,11 @@ import psycopg2
 import zipfile
 import requests
 
+def load_config():
+    with open('/opt/asp-24/asp.json', 'r') as file:
+        config = json.load(file)
+    return config
+
 def download_file(url, file_name):
     try:
         response = requests.get(url)
@@ -66,10 +71,11 @@ def insert_data(conn, data):
 
 
 def main_cve_DB():
+    config = load_config()
     try:
         print("Подключение к БД")
         conn = psycopg2.connect(
-            host='192.168.0.11',
+            host=config['database']['ip'],
             database='hack_db',
             user='postgres',
             password='sovietchungus',
@@ -77,7 +83,7 @@ def main_cve_DB():
         )
 
     except Exception as e:
-        print(f"Ошибка подключения к базе данных: {e}")
+        exit(f"Ошибка подключения к базе данных: {e}")
 
     if conn:
         create_table_CVE(conn)  
@@ -87,7 +93,7 @@ def main_cve_DB():
             conn.commit
         
         
-
+    print("Обновление базы данных уязвимостей NIST...")
     for i in range(2023, 2024 + 1):
         nist_url = f'https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-{i}.json.zip'
         zip_file_name=f'./nvdcve-1.1-{i}.json.zip'
