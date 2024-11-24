@@ -2,6 +2,7 @@ import psycopg2
 from psycopg2 import sql
 from datetime import datetime,timezone
 import re
+import requests
 import time
 def cve_getter(product_version_query, conn):
     with conn.cursor() as cur:
@@ -41,9 +42,11 @@ def main_anlt_module(scan_result_dict, scan_id):
             protocol = scan_result_dict[ip_addr]['ports'].get(port).get('protocol')
             product = scan_result_dict[ip_addr]['ports'].get(port).get('software')
             version = scan_result_dict[ip_addr]['ports'].get(port).get('version')
-            # version = re.search(r'^[\d\.]+', version_dirty).group(0) подумать
+            if version is not None:
+                match = re.search(r'^[\d\.]+', version) # подумать
+                if match is not None:
+                    version = match.group(0)
             
-
             if product is None:
                 full_tuple = (ip_addr, port, state, service, protocol, product, version, None, scan_id, scan_time)
                 full_data.append(full_tuple)
@@ -59,6 +62,7 @@ def main_anlt_module(scan_result_dict, scan_id):
                 full_data.append(full_tuple)
             
     insert_data(conn, full_data)
+    send_to_tg(ip_addr_counter, conn)
 
 
 def create_table_analytics(conn):
@@ -88,9 +92,13 @@ def insert_data(conn, data):
         conn.commit()
 
 
-# def send_to_tg(ip_addr_counter, conn):
-#     with conn.cursor() as cur:
-#         query = f"SELECT id, cve_id FROM cve_table WHERE cve_table.id IN (SELECT CAST(analytics.cve_info AS DECIMAL) FROM analytics) DESC LIMIT 3"
-#         cur.execute(query)
-#         records = cur.fetchall()
-#     tg_message = f'Сканирование завершено\nПросканировано {ip_addr_counter} ip-адресов\nТоп найденных язвимостей: \n{records}'
+def send_to_tg(ip_addr_counter, conn):
+    with conn.cursor() as cur:
+        query = f"SELECT id, cve_id, cvss FROM cve_table WHERE cve_table.id IN (SELECT CAST(analytics.cve_info AS DECIMAL) FROM analytics) ORDER BY cvss DESC LIMIT 3"
+        cur.execute(query)
+        records = cur.fetchall()
+    tg_message = f'Сканирование завершено\nПросканировано {ip_addr_counter} ip-адресов\nТоп найденных язвимостей: \n{records}'
+    TOKEN = "7799725093:AAFj5jVR6f_xON3RvblvSEYKetkaa1A_Wk4"
+    CHAT_ID = "1338937662" # чат администратора
+    url_req = "https://api.telegram.org/bot" + TOKEN + "/sendMessage" + "?chat_id=" + CHAT_ID + "&text=" + tg_message
+    requests.get(url_req)
